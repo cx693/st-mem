@@ -2,10 +2,14 @@
 name = "st-mem"
 version = "0.1.0"
 edition = "2021"
+authors = ["cx693"]
 description = "Parse embedded firmware memory layout from memory.x linker scripts and ELF binaries, display FLASH/RAM usage with progress bars"
 license = "MIT"
+repository = "https://github.com/cx693/st-mem"
+homepage = "https://github.com/cx693/st-mem"
+readme = "README.md"
 keywords = ["embedded", "stm32", "memory", "firmware", "elf"]
-categories = ["embedded", "no-std"]
+categories = ["embedded", "no-std", "command-line-utilities"]
 
 [[bin]]
 name = "st-mem"
