@@ -1,5 +1,7 @@
 # st-mem
 
+> GitHub: https://github.com/cx693/st-mem
+
 嵌入式固件内存分析工具。解析 `memory.x` 链接脚本和 ELF 二进制文件，统计 FLASH / RAM 占用，以进度条方式直观展示。
 
 ```
@@ -38,10 +40,12 @@ probe-rs 支持的下载器与芯片：
 ## 安装
 
 ```bash
+# 从本地源码安装
+git clone https://github.com/cx693/st-mem.git
 cd st-mem
 cargo install --path .
 
-# 发布后
+# 发布后从 crates.io 安装
 cargo install st-mem
 ```
 
@@ -192,9 +196,11 @@ MEMORY
 
 Runner 配置无需区分平台，直接使用 `st-mem runner` 即可，所有平台配置一致。
 
-## 使用模版
-.cargo/config.toml
-```
+## 配置模版
+
+`.cargo/config.toml` 完整示例：
+
+```toml
 [target.thumbv7m-none-eabi]
 # ============================================================
 # Runner — st-mem runner (跨平台，先分析内存再烧录)
@@ -219,7 +225,6 @@ DEFMT_LOG = "info"
 [alias]
 r = "run --release"
 ```
-
 
 ## License
 
