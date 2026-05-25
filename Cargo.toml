@@ -1,0 +1,12 @@
+[package]
+name = "st-mem"
+version = "0.1.0"
+edition = "2021"
+description = "Parse embedded firmware memory layout from memory.x linker scripts and ELF binaries, display FLASH/RAM usage with progress bars"
+license = "MIT"
+keywords = ["embedded", "stm32", "memory", "firmware", "elf"]
+categories = ["embedded", "no-std"]
+
+[[bin]]
+name = "st-mem"
+path = "src/bin/st-mem.rs"
