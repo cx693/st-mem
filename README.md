@@ -1,6 +1,8 @@
 # st-mem
 
-> GitHub: https://github.com/cx693/st-mem
+[![Crates.io](https://img.shields.io/crates/v/st-mem)](https://crates.io/crates/st-mem)
+[![License](https://img.shields.io/crates/l/st-mem)](https://github.com/cx693/st-mem)
+[![Docs.rs](https://docs.rs/st-mem/badge.svg)](https://docs.rs/st-mem)
 
 嵌入式固件内存分析工具。解析 `memory.x` 链接脚本和 ELF 二进制文件，统计 FLASH / RAM 占用，以进度条方式直观展示。
 
@@ -12,41 +14,28 @@
   +----------------------------------------------------------------+
 ```
 
-## 前置依赖
+## 功能
 
-### probe-rs
-
-Runner 模式使用 [probe-rs](https://probe.rs/) 进行固件烧录，需要先安装：
-
-
-probe-rs 支持的下载器与芯片：
-
-| 下载器 | 协议参数 |
-|---|---|
-| ST-Link | `--protocol swd` |
-| J-Link | `--protocol jtag` / `--protocol swd` |
-| CMSIS-DAP | `--protocol swd` |
-
-芯片通过 `--chip` 参数指定，例如：
-
-```bash
---chip STM32F103C8
---chip STM32F407VG
---chip nRF52840
-```
-
-完整芯片列表见 [probe-rs 目标支持](https://probe.rs/targets/)。
+- 解析 GNU LD `memory.x` 链接脚本，提取 FLASH / RAM 区域定义
+- 解析 ELF 二进制文件的 section headers，按地址范围归类到 FLASH / RAM
+- 以进度条和百分比直观展示固件内存占用
+- Runner 模式：分析完成后自动调用 [probe-rs](https://probe.rs/) 烧录固件
+- 跨平台支持（macOS / Linux / Windows）
 
 ## 安装
 
+### 从 crates.io 安装（推荐）
+
 ```bash
-# 从本地源码安装
+cargo install st-mem
+```
+
+### 从源码安装
+
+```bash
 git clone https://github.com/cx693/st-mem.git
 cd st-mem
 cargo install --path .
-
-# 发布后从 crates.io 安装
-cargo install st-mem
 ```
 
 安装后获得 `st-mem` 命令。
@@ -89,6 +78,32 @@ st-mem runner --chip STM32F103C8 --protocol swd target/thumbv7m-none-eabi/releas
 probe-rs run --chip STM32F103C8 --protocol swd target/thumbv7m-none-eabi/release/firmware
 ```
 
+### 前置依赖：probe-rs
+
+Runner 模式需要先安装 [probe-rs](https://probe.rs/)：
+
+```bash
+cargo install probe-rs-tools
+```
+
+probe-rs 支持的下载器与芯片：
+
+| 下载器 | 协议参数 |
+|---|---|
+| ST-Link | `--protocol swd` |
+| J-Link | `--protocol jtag` / `--protocol swd` |
+| CMSIS-DAP | `--protocol swd` |
+
+芯片通过 `--chip` 参数指定，例如：
+
+```bash
+--chip STM32F103C8
+--chip STM32F407VG
+--chip nRF52840
+```
+
+完整芯片列表见 [probe-rs 目标支持](https://probe.rs/targets/)。
+
 ### 集成到 cargo
 
 在项目的 `.cargo/config.toml` 中配置：
@@ -125,21 +140,24 @@ r = "run --release"
 cargo r   # 编译 + 分析 + 烧录
 ```
 
-## 参数
+## 命令行参数
 
 | 参数 | 说明 | 默认值 |
 |---|---|---|
 | `--memory-x <path>` | memory.x 文件路径 | `memory.x` |
 | `--elf <path>` | ELF 文件路径（也可直接用位置参数） | - |
 | `--width <n>` | 进度条宽度（字符数） | `30` |
+| `--help`, `-h` | 显示帮助信息 | - |
 
 ## 库 API
+
+`st-mem` 同时提供库 API，可在其他 Rust 项目中直接调用。
 
 在 Cargo.toml 中添加依赖：
 
 ```toml
 [dependencies]
-st-mem = { path = "st-mem" }
+st-mem = "0.1"
 ```
 
 ```rust
@@ -161,6 +179,7 @@ println!("{}", format_report(&usage, 30));
 | `format_report(&usage, width)` | 生成格式化的内存报告字符串 |
 | `format_bytes(bytes)` | 字节数转可读格式（B / KB / MB） |
 | `progress_bar(pct, width)` | 生成进度条字符串 |
+| `print_report(elf_path, memory_x_path)` | 分析并打印报告到 stdout |
 
 ## memory.x 格式
 
@@ -183,6 +202,8 @@ MEMORY
   RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 20K
 }
 ```
+
+支持的长度单位：`K`（KB）、`M`（MB），也支持小数如 `0.5K`。
 
 ## 跨平台
 
