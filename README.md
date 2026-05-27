@@ -19,6 +19,9 @@
 - 解析 GNU LD `memory.x` 链接脚本，提取 FLASH / RAM 区域定义
 - 解析 ELF 二进制文件的 section headers，按地址范围归类到 FLASH / RAM
 - 以进度条和百分比直观展示固件内存占用
+- **Section 拆分统计**：单独展示每个 section 的占用、占比和进度条（`--sections`）
+- **数据导出**：输出 JSON / Markdown 格式报告，适用于日志归档和 CI 流水线（`--export`）
+- **版本信息**：`-V` 显示版本、作者和项目地址
 - Runner 模式：分析完成后自动调用 [probe-rs](https://probe.rs/) 烧录固件
 - 跨平台支持（macOS / Linux / Windows）
 
@@ -56,6 +59,60 @@ st-mem target/thumbv7m-none-eabi/release/firmware
 
 ```bash
 st-mem target/thumbv7m-none-eabi/release/firmware --memory-x path/to/memory.x
+```
+
+### Section 拆分统计
+
+使用 `--sections` 查看每个 section 的独立占用：
+
+```bash
+st-mem firmware.elf --sections
+```
+
+```
+  [FIRMWARE SIZE]
+  +----------------------------------------------------------------+
+  | FLASH [████░░░░░░░░░░░░░░░░░░░░░░░░░░]  15.1%    9 KB / 64 KB  |
+  | RAM   [█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]   0.0%     4 B / 20 KB  |
+  +----------------------------------------------------------------+
+
+  [FLASH Sections] (9 KB total)
+  NAME               SIZE       %  BAR
+  .text              7 KB   11.8%  [███░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+  .rodata            1 KB    2.9%  [█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+  .vector_table     304 B    0.5%  [█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+
+  [RAM Sections] (4 B total)
+  NAME               SIZE       %  BAR
+  .bss                4 B    0.0%  [█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+```
+
+### 数据导出
+
+导出 JSON 格式（适用于程序解析和 CI 流水线）：
+
+```bash
+st-mem firmware.elf --export json > report.json
+```
+
+导出 Markdown 格式（适用于文档归档）：
+
+```bash
+st-mem firmware.elf --export md > report.md
+```
+
+### 查看版本
+
+```bash
+st-mem -V
+```
+
+```
+st-mem v0.1.2
+Parse embedded firmware memory layout from memory.x linker scripts and ELF binaries, display FLASH/RAM usage with progress bars
+Author: cx693
+License: MIT
+Repository: https://github.com/cx693/st-mem
 ```
 
 ### Runner 模式（分析 + 烧录）
@@ -147,6 +204,9 @@ cargo r   # 编译 + 分析 + 烧录
 | `--memory-x <path>` | memory.x 文件路径 | `memory.x` |
 | `--elf <path>` | ELF 文件路径（也可直接用位置参数） | - |
 | `--width <n>` | 进度条宽度（字符数） | `30` |
+| `--sections` | 显示每个 section 的独立占用（默认关闭） | - |
+| `--export <fmt>` | 导出报告：`json` 或 `md`（默认不导出） | - |
+| `--version`, `-V` | 显示版本、作者和项目地址 | - |
 | `--help`, `-h` | 显示帮助信息 | - |
 
 ## 库 API
@@ -161,11 +221,19 @@ st-mem = "0.1"
 ```
 
 ```rust
-use st_mem::{MemoryConfig, analyze_elf, format_report};
+use st_mem::{MemoryConfig, analyze_elf, analyze_elf_detailed, format_report, format_sections, ExportReport};
 
 let config = MemoryConfig::from_file("memory.x")?;
 let usage = analyze_elf("firmware.elf", &config)?;
 println!("{}", format_report(&usage, 30));
+
+// 带 section 详情
+let analysis = analyze_elf_detailed("firmware.elf", &config)?;
+println!("{}", format_sections(&analysis, 30));
+
+// 导出 JSON
+let report = ExportReport::from_analysis(&analysis);
+println!("{}", report.to_json());
 ```
 
 ### API 说明
@@ -176,7 +244,12 @@ println!("{}", format_report(&usage, 30));
 | `MemoryConfig::parse(content)` | 从字符串解析 |
 | `config.flash()` / `config.ram()` | 获取 FLASH / RAM 区域信息 |
 | `analyze_elf(path, &config)` | 分析 ELF 文件，返回 `FirmwareUsage` |
+| `analyze_elf_detailed(path, &config)` | 分析 ELF 文件，返回 `ElfAnalysis`（含 section 详情） |
 | `format_report(&usage, width)` | 生成格式化的内存报告字符串 |
+| `format_sections(&analysis, width)` | 生成 section 拆分统计表格 |
+| `ExportReport::from_analysis(&analysis)` | 构建可导出的报告结构 |
+| `report.to_json()` | 导出 JSON 格式字符串 |
+| `report.to_markdown()` | 导出 Markdown 格式字符串 |
 | `format_bytes(bytes)` | 字节数转可读格式（B / KB / MB） |
 | `progress_bar(pct, width)` | 生成进度条字符串 |
 | `print_report(elf_path, memory_x_path)` | 分析并打印报告到 stdout |
