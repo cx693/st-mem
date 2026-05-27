@@ -1,6 +1,6 @@
 [package]
 name = "st-mem"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["cx693"]
 description = "Parse embedded firmware memory layout from memory.x linker scripts and ELF binaries, display FLASH/RAM usage with progress bars"
