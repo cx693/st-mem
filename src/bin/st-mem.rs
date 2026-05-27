@@ -1,3 +1,4 @@
+use std::fs;
 use std::process::Command;
 use st_mem::{MemoryConfig, analyze_elf, analyze_elf_detailed, format_report, format_sections, ExportReport};
 
@@ -8,12 +9,12 @@ const PKG_AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
 const PKG_REPO: &str = env!("CARGO_PKG_REPOSITORY");
 const PKG_LICENSE: &str = env!("CARGO_PKG_LICENSE");
 
-/// st-mem 自身的参数集合
 struct StMemOpts {
     memory_x: String,
     bar_width: usize,
     show_sections: bool,
     export: Option<String>,
+    out: Option<String>,
 }
 
 impl Default for StMemOpts {
@@ -23,6 +24,7 @@ impl Default for StMemOpts {
             bar_width: 30,
             show_sections: false,
             export: None,
+            out: None,
         }
     }
 }
@@ -35,7 +37,23 @@ fn parse_st_mem_opts(args: &[&str]) -> StMemOpts {
     }
     if args.iter().any(|&a| a == "--sections") { opts.show_sections = true; }
     if let Some(v) = find_arg(args, "--export") { opts.export = Some(v); }
+    if let Some(v) = find_arg(args, "--out") { opts.out = Some(v); }
     opts
+}
+
+/// 确定导出文件路径
+/// 优先级: --out > 默认文件名(report.json/report.md)
+fn resolve_out_path(opts: &StMemOpts) -> Option<String> {
+    let fmt = opts.export.as_deref()?;
+    if let Some(path) = &opts.out {
+        return Some(path.clone());
+    }
+    // 没指定 --out，用默认文件名
+    match fmt {
+        "json" => Some("report.json".to_string()),
+        "md" | "markdown" => Some("report.md".to_string()),
+        _ => None,
+    }
 }
 
 fn main() {
@@ -52,11 +70,9 @@ fn main() {
         return;
     }
 
-    // 查找 "runner" 关键字的位置
     let runner_pos = rest.iter().position(|&a| a == "runner");
 
     if let Some(pos) = runner_pos {
-        // runner 模式: runner 之前的是 st-mem 参数，之后的是 probe-rs 参数
         let st_mem_args = &rest[..pos];
         let probe_rs_args = &rest[pos + 1..];
         let opts = parse_st_mem_opts(st_mem_args);
@@ -72,13 +88,11 @@ fn run_analyze(args: &[&str]) {
 
     let elf_path = find_arg(args, "--elf")
         .or_else(|| {
-            // 取第一个不以 -- 开头且不是某个 flag 的值的参数
             let mut i = 0;
             while i < args.len() {
                 if args[i].starts_with('-') {
-                    // 跳过 flag 及其可能的值
-                    if matches!(args[i], "--memory-x" | "--elf" | "--width" | "--export") {
-                        i += 2; // 跳过 flag + value
+                    if matches!(args[i], "--memory-x" | "--elf" | "--width" | "--export" | "--out") {
+                        i += 2;
                         continue;
                     }
                     i += 1;
@@ -102,14 +116,6 @@ fn run_analyze(args: &[&str]) {
     do_analysis(&elf_path, &config, &opts);
 }
 
-/// Runner 模式: 分析 → 烧录
-///
-/// 命令格式:
-///   st-mem [st-mem flags] runner [probe-rs args] <elf-path>
-///
-/// 例如:
-///   st-mem --sections runner --chip STM32F103C8 --protocol swd firmware.elf
-///   st-mem runner --chip STM32F103C8 --protocol swd firmware.elf
 fn run_as_runner(probe_rs_args: &[&str], opts: &StMemOpts) {
     if probe_rs_args.is_empty() {
         eprintln!("[ERROR] runner mode requires probe-rs arguments and an ELF path");
@@ -117,7 +123,6 @@ fn run_as_runner(probe_rs_args: &[&str], opts: &StMemOpts) {
         std::process::exit(1);
     }
 
-    // 从 probe_rs_args 中找 ELF 路径（最后一个不以 - 开头的参数）
     let mut elf_idx = None;
     for (i, &arg) in probe_rs_args.iter().enumerate() {
         if !arg.starts_with('-') {
@@ -135,13 +140,15 @@ fn run_as_runner(probe_rs_args: &[&str], opts: &StMemOpts) {
     match MemoryConfig::from_file(&opts.memory_x) {
         Ok(config) => {
             if let Ok(analysis) = analyze_elf_detailed(elf_path, &config) {
-                println!();
-                println!("{}", format_report(&analysis.usage, opts.bar_width));
+                eprintln!();
+                eprintln!("{}", format_report(&analysis.usage, opts.bar_width));
                 if opts.show_sections {
-                    print!("{}", format_sections(&analysis, opts.bar_width));
+                    eprint!("{}", format_sections(&analysis, opts.bar_width));
                 }
-                println!();
-                println!("[INFO] Firmware: {}", elf_path);
+                eprintln!();
+                eprintln!("[INFO] Firmware: {}", elf_path);
+
+                export_to_file(&analysis, opts);
             }
         }
         Err(e) => {
@@ -152,7 +159,6 @@ fn run_as_runner(probe_rs_args: &[&str], opts: &StMemOpts) {
     run_probe_rs(probe_rs_args);
 }
 
-/// 分析 ELF 并根据 opts 决定输出格式
 fn do_analysis(elf_path: &str, config: &MemoryConfig, opts: &StMemOpts) {
     if opts.show_sections || opts.export.is_some() {
         let analysis = analyze_elf_detailed(elf_path, config).unwrap_or_else(|e| {
@@ -160,47 +166,58 @@ fn do_analysis(elf_path: &str, config: &MemoryConfig, opts: &StMemOpts) {
             std::process::exit(1);
         });
 
-        match opts.export.as_deref() {
-            Some("json") => {
-                let report = ExportReport::from_analysis(&analysis);
-                println!("{}", report.to_json());
-                return;
-            }
-            Some("md") | Some("markdown") => {
-                let report = ExportReport::from_analysis(&analysis);
-                print!("{}", report.to_markdown());
-                return;
-            }
-            Some(other) => {
-                eprintln!("[ERROR] Unknown export format '{}'. Use 'json' or 'md'.", other);
-                std::process::exit(1);
-            }
-            None => {}
-        }
-
-        println!();
-        println!("{}", format_report(&analysis.usage, opts.bar_width));
+        eprintln!();
+        eprintln!("{}", format_report(&analysis.usage, opts.bar_width));
         if opts.show_sections {
-            print!("{}", format_sections(&analysis, opts.bar_width));
+            eprint!("{}", format_sections(&analysis, opts.bar_width));
         }
-        println!();
-        println!("[INFO] Firmware: {}", elf_path);
+        eprintln!();
+        eprintln!("[INFO] Firmware: {}", elf_path);
+
+        export_to_file(&analysis, opts);
     } else {
         let usage = analyze_elf(elf_path, config).unwrap_or_else(|e| {
             eprintln!("[ERROR] {}", e);
             std::process::exit(1);
         });
 
-        println!();
-        println!("{}", format_report(&usage, opts.bar_width));
-        println!();
-        println!("[INFO] Firmware: {}", elf_path);
+        eprintln!();
+        eprintln!("{}", format_report(&usage, opts.bar_width));
+        eprintln!();
+        eprintln!("[INFO] Firmware: {}", elf_path);
+    }
+}
+
+/// 导出到文件（内部函数，由 do_analysis 和 run_as_runner 共用）
+fn export_to_file(analysis: &st_mem::ElfAnalysis, opts: &StMemOpts) {
+    let out_path = match resolve_out_path(opts) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let fmt = opts.export.as_deref().unwrap_or("md");
+    let report = ExportReport::from_analysis(analysis);
+    let content = match fmt {
+        "json" => report.to_json(),
+        "md" | "markdown" => report.to_markdown(),
+        other => {
+            eprintln!("[ERROR] Unknown export format '{}'. Use 'json' or 'md'.", other);
+            std::process::exit(1);
+        }
+    };
+
+    match fs::write(&out_path, &content) {
+        Ok(()) => { eprintln!("[INFO] Exported to: {}", out_path); }
+        Err(e) => {
+            eprintln!("[ERROR] Failed to write {}: {}", out_path, e);
+            std::process::exit(1);
+        }
     }
 }
 
 fn run_probe_rs(args: &[&str]) {
-    println!("[FLASH] Programming via probe-rs...");
-    println!();
+    eprintln!("[FLASH] Programming via probe-rs...");
+    eprintln!();
 
     let status = Command::new("probe-rs")
         .arg("run")
@@ -209,8 +226,8 @@ fn run_probe_rs(args: &[&str]) {
 
     match status {
         Ok(s) if s.success() => {
-            println!();
-            println!("[DONE] Flash complete!");
+            eprintln!();
+            eprintln!("[DONE] Flash complete!");
         }
         Ok(s) => {
             eprintln!("[ERROR] probe-rs exited with: {:?}", s);
@@ -254,19 +271,17 @@ fn print_help() {
     println!("  --width <n>         Progress bar width in characters (default: 30)");
     println!("  --sections          Show per-section breakdown (default: off)");
     println!("  --export <fmt>      Export report as 'json' or 'md' (default: off)");
+    println!("  --out <path>        Export file path (default: report.json / report.md)");
     println!("  --version, -V       Show version and project info");
     println!("  --help, -h          Show this help");
     println!();
     println!("Runner mode:");
     println!("  st-mem flags are placed BEFORE 'runner', probe-rs flags AFTER.");
-    println!("  Example:");
-    println!("    st-mem --sections --width 40 runner --chip STM32F103C8 --protocol swd firmware.elf");
     println!();
     println!("Examples:");
-    println!("  st-mem target/thumbv7m-none-eabi/debug/firmware");
-    println!("  st-mem firmware.elf --sections");
-    println!("  st-mem firmware.elf --export json > report.json");
-    println!("  st-mem firmware.elf --export md > report.md");
-    println!("  st-mem runner --chip STM32F103C8 --protocol swd firmware.elf");
-    println!("  st-mem --sections --width 40 runner --chip STM32F103C8 --protocol swd firmware.elf");
+    println!("  st-mem firmware.elf                                  Basic analysis");
+    println!("  st-mem firmware.elf --sections                       With section breakdown");
+    println!("  st-mem firmware.elf --export md                      Export to report.md (default)");
+    println!("  st-mem firmware.elf --export json --out data.json    Export to custom path");
+    println!("  st-mem --sections --export md runner --chip STM32F103C8 --protocol swd firmware.elf");
 }
